@@ -2,7 +2,8 @@ import Foundation
 import AppKit
 import SwiftUI
 
-/// Fullscreen non-activating transparent NSPanel hosting the companion overlay across all spaces
+/// Fullscreen transparent NSPanel hosting the companion overlay across all spaces.
+/// Permanently non-interactive (ignoresMouseEvents = true) so it NEVER blocks user clicks or scroll events on any app.
 public final class OverlayPanel: NSPanel {
     public static let shared = OverlayPanel()
 
@@ -16,17 +17,28 @@ public final class OverlayPanel: NSPanel {
             defer: false
         )
 
-        self.level = .screenSaver
+        // Make window transparent and completely non-interactive
         self.isOpaque = false
         self.backgroundColor = .clear
+        self.level = .floating
+        self.ignoresMouseEvents = true  // 100% click-through & scroll-through: never blocks user clicks or scrolling!
+        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        self.isReleasedWhenClosed = false
         self.hasShadow = false
-        self.ignoresMouseEvents = true
-        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        self.hidesOnDeactivate = false
 
         let hostingView = NSHostingView(rootView: CompanionCursorView())
         hostingView.frame = primaryFrame
         hostingView.autoresizingMask = [.width, .height]
         self.contentView = hostingView
+    }
+
+    override public var canBecomeKey: Bool {
+        return false
+    }
+
+    override public var canBecomeMain: Bool {
+        return false
     }
 
     /// Repositions overlay to fit current screen setup

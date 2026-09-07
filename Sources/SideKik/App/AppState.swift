@@ -69,6 +69,14 @@ public final class AppState: ObservableObject {
     @Published public var activeTaskDescription: String? = nil
     @Published public var activeTaskProgress: Double? = nil
 
+    // MARK: - Guided Tour (Desktop Tutor)
+    @Published public var isTourActive: Bool = false
+    @Published public var currentTourStep: Int = 0
+    @Published public var totalTourSteps: Int = 0
+    @Published public var isTourPaused: Bool = false
+    @Published public var activeTourSteps: [TourStep] = []
+    @Published public var interactiveElementRects: [NSRect] = []
+
     // MARK: - Permissions
     @Published public var hasMicrophonePermission: Bool = false
     @Published public var hasScreenCapturePermission: Bool = false
@@ -77,14 +85,44 @@ public final class AppState: ObservableObject {
     // MARK: - Settings & API Keys
     @Published public var geminiApiKey: String = ""
     @Published public var sarvamApiKey: String = ""
-    @Published public var useLocalSpeechFallback: Bool = false
     @Published public var selectedVoice: String = "shubh"
     @Published public var speechPace: Double = 1.05
+    @Published public var autoClick: Bool = false
+    @Published public var hasCompletedOnboarding: Bool = false
+
+    // MARK: - Overlay Window Click-Through Tracking
+    @Published public var bubbleRect: NSRect? = nil
 
     // MARK: - History
     @Published public var recentEntries: [JournalEntry] = []
 
-    private init() {}
+    private init() {
+        loadConfig()
+    }
+
+    public func loadConfig() {
+        let config = ConfigManager.shared.load()
+        self.geminiApiKey = config.geminiApiKey
+        self.sarvamApiKey = config.sarvamApiKey
+        self.selectedVoice = config.selectedVoice
+        self.selectedPetId = config.selectedPetId
+        self.speechPace = config.speechPace
+        self.autoClick = config.autoClick
+        self.hasCompletedOnboarding = config.hasCompletedOnboarding
+    }
+
+    public func saveConfig() {
+        let config = SideKikConfig(
+            geminiApiKey: self.geminiApiKey,
+            sarvamApiKey: self.sarvamApiKey,
+            selectedVoice: self.selectedVoice,
+            selectedPetId: self.selectedPetId,
+            speechPace: self.speechPace,
+            autoClick: self.autoClick,
+            hasCompletedOnboarding: self.hasCompletedOnboarding
+        )
+        ConfigManager.shared.save(config)
+    }
 
     public func setAlert(_ alert: AgentAlert) {
         self.activeAlert = alert

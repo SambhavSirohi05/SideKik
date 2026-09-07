@@ -134,11 +134,18 @@ public final class AudioManager: NSObject, AVAudioPlayerDelegate, @unchecked Sen
         }
     }
 
-    public func stopAudio() {
+    public var isPlaying: Bool {
+        player?.isPlaying ?? false
+    }
+
+    public func stopAudio(notifyCompletion: Bool = false) {
+        let callback = onPlaybackFinished
+        onPlaybackFinished = nil
         player?.stop()
         player = nil
-        onPlaybackFinished?()
-        onPlaybackFinished = nil
+        if notifyCompletion {
+            callback?()
+        }
     }
 
     // MARK: - AVAudioPlayerDelegate

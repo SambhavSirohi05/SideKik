@@ -1,11 +1,12 @@
 import SwiftUI
 
-/// Definitions and themes for selectable pet companion personas
+/// Definitions and themes for selectable pet companion personas powered by OpenPets
 public struct PetIdentity: Identifiable, Sendable, Equatable {
     public let id: String
     public let name: String
     public let title: String
     public let description: String
+    public let openPetsId: String
     public let primaryColorHex: String
     public let secondaryColorHex: String
     public let accentColorHex: String
@@ -15,6 +16,7 @@ public struct PetIdentity: Identifiable, Sendable, Equatable {
         name: String,
         title: String,
         description: String,
+        openPetsId: String,
         primaryColorHex: String,
         secondaryColorHex: String,
         accentColorHex: String
@@ -23,6 +25,7 @@ public struct PetIdentity: Identifiable, Sendable, Equatable {
         self.name = name
         self.title = title
         self.description = description
+        self.openPetsId = openPetsId
         self.primaryColorHex = primaryColorHex
         self.secondaryColorHex = secondaryColorHex
         self.accentColorHex = accentColorHex
@@ -30,47 +33,51 @@ public struct PetIdentity: Identifiable, Sendable, Equatable {
 
     public static let sparky = PetIdentity(
         id: "sparky",
-        name: "Sparky",
+        name: "Fenne",
         title: "Cyber Fox",
-        description: "Energetic digital kitsune with alert ears and warm amber aura.",
+        description: "Lively orange fox with oversized ears, curious trot, and warm amber aura.",
+        openPetsId: "fenne-fox",
         primaryColorHex: "#FF7A00",
         secondaryColorHex: "#FFA94D",
         accentColorHex: "#FFF3BF"
     )
 
-    public static let ghosty = PetIdentity(
-        id: "ghosty",
-        name: "Ghosty",
-        title: "Ambient Spirit",
-        description: "Gentle pastel spirit with soft translucent float and blushing expressions.",
-        primaryColorHex: "#B197FC",
-        secondaryColorHex: "#D0BFFF",
-        accentColorHex: "#E5DBFF"
-    )
-
     public static let pixelCat = PetIdentity(
         id: "pixelcat",
-        name: "Pixel Cat",
-        title: "Retro Neko",
-        description: "16-bit retro arcade buddy with twitching ears and wagging tail.",
-        primaryColorHex: "#4DABF7",
-        secondaryColorHex: "#74C0FC",
-        accentColorHex: "#D0EBFF"
+        name: "Yuzu",
+        title: "Golden Kitten",
+        description: "Tiny golden tabby kitten with bright round eyes, soft paws, and playful bounce.",
+        openPetsId: "yuzu-golden-kitten",
+        primaryColorHex: "#F59F00",
+        secondaryColorHex: "#FFD43B",
+        accentColorHex: "#FFF9DB"
+    )
+
+    public static let ghosty = PetIdentity(
+        id: "ghosty",
+        name: "Barnaby",
+        title: "OpenPets Bear",
+        description: "The iconic OpenPets companion bear with gentle gestures and friendly guidance.",
+        openPetsId: "default-pet",
+        primaryColorHex: "#4C6EF5",
+        secondaryColorHex: "#748FFC",
+        accentColorHex: "#EDF2FF"
     )
 
     public static let robo = PetIdentity(
         id: "robo",
-        name: "Robo-Clicky",
-        title: "AI Orb",
-        description: "Classic cybernetic floating sphere with expressive neon visor.",
-        primaryColorHex: "#20C997",
-        secondaryColorHex: "#38D9A9",
-        accentColorHex: "#63E6BE"
+        name: "Banana",
+        title: "Skater Buddy",
+        description: "Cheerful curved yellow banana on a skateboard wearing a red cap and sneakers.",
+        openPetsId: "banana-skater",
+        primaryColorHex: "#FCC419",
+        secondaryColorHex: "#FFE066",
+        accentColorHex: "#FFF9DB"
     )
 
-    public static let allPets: [PetIdentity] = [.sparky, .ghosty, .pixelCat, .robo]
+    public static let allPets: [PetIdentity] = [.sparky, .pixelCat, .ghosty, .robo]
 
     public static func find(byId id: String) -> PetIdentity {
-        allPets.first(where: { $0.id == id }) ?? .sparky
+        allPets.first(where: { $0.id == id || $0.openPetsId == id }) ?? .sparky
     }
 }

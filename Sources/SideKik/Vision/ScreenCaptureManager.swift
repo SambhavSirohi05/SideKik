@@ -27,42 +27,63 @@ public final class ScreenCaptureManager: Sendable {
             throw NSError(domain: "ScreenCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "No active display found."])
         }
 
-        // Extract display ID from NSScreen deviceDescription
-        guard let displayIDNumber = currentScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
-            throw NSError(domain: "ScreenCapture", code: 2, userInfo: [NSLocalizedDescriptionKey: "Unable to retrieve display ID."])
+        let displayIDNumber = currentScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        let targetDisplayID = CGDirectDisplayID(displayIDNumber?.uint32Value ?? CGMainDisplayID())
+
+        // Try hardware-accelerated ScreenCaptureKit first
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            if let scDisplay = content.displays.first(where: { $0.displayID == targetDisplayID }) ?? content.displays.first {
+                let filter = SCContentFilter(display: scDisplay, excludingApplications: [], exceptingWindows: [])
+                let config = SCStreamConfiguration()
+                config.showsCursor = false
+                let scale = currentScreen.backingScaleFactor > 0 ? currentScreen.backingScaleFactor : 2.0
+                config.width = Int(CGFloat(scDisplay.width) * scale)
+                config.height = Int(CGFloat(scDisplay.height) * scale)
+                config.scalesToFit = false
+
+                let rawCGImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let resizedImage = resizeCGImage(rawCGImage, maxDimension: 1280)
+                if let jpegData = jpegDataFromCGImage(resizedImage, compressionQuality: 0.75) {
+                    return ScreenCaptureResult(
+                        imageBase64: jpegData.base64EncodedString(),
+                        screenFrame: currentScreen.frame,
+                        displayID: targetDisplayID,
+                        pixelWidth: resizedImage.width,
+                        pixelHeight: resizedImage.height
+                    )
+                }
+            }
+        } catch {
+            print("ScreenCaptureKit notice: \(error.localizedDescription), using native display capture fallback")
         }
-        let targetDisplayID = CGDirectDisplayID(displayIDNumber.uint32Value)
 
-        // Query SCShareableContent
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let scDisplay = content.displays.first(where: { $0.displayID == targetDisplayID }) ?? content.displays.first else {
-            throw NSError(domain: "ScreenCapture", code: 3, userInfo: [NSLocalizedDescriptionKey: "Matching SCDisplay not found."])
+        // Seamless native macOS fallback
+        return try captureViaCLI(screen: currentScreen, displayID: targetDisplayID)
+    }
+
+    private func captureViaCLI(screen: NSScreen, displayID: CGDirectDisplayID) throws -> ScreenCaptureResult {
+        let tempPath = "/tmp/sidekik_screen_\(UUID().uuidString).jpg"
+        defer { try? FileManager.default.removeItem(atPath: tempPath) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-t", "jpg", tempPath]
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0,
+              let data = try? Data(contentsOf: URL(fileURLWithPath: tempPath)),
+              !data.isEmpty else {
+            throw NSError(domain: "ScreenCapture", code: 5, userInfo: [NSLocalizedDescriptionKey: "Native display capture failed."])
         }
-
-        let filter = SCContentFilter(display: scDisplay, excludingApplications: [], exceptingWindows: [])
-        let config = SCStreamConfiguration()
-        config.showsCursor = false
-        config.scalesToFit = true
-
-        // Capture frame in memory (< 15ms)
-        let rawCGImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-
-        // Resize image to max 1280px maintaining aspect ratio
-        let resizedImage = resizeCGImage(rawCGImage, maxDimension: 1280)
-
-        // Compress to JPEG Data and Base64
-        guard let jpegData = jpegDataFromCGImage(resizedImage, compressionQuality: 0.75) else {
-            throw NSError(domain: "ScreenCapture", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to encode JPEG buffer."])
-        }
-
-        let base64String = jpegData.base64EncodedString()
 
         return ScreenCaptureResult(
-            imageBase64: base64String,
-            screenFrame: currentScreen.frame,
-            displayID: targetDisplayID,
-            pixelWidth: resizedImage.width,
-            pixelHeight: resizedImage.height
+            imageBase64: data.base64EncodedString(),
+            screenFrame: screen.frame,
+            displayID: displayID,
+            pixelWidth: Int(screen.frame.width),
+            pixelHeight: Int(screen.frame.height)
         )
     }
 

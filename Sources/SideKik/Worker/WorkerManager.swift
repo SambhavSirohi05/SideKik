@@ -86,7 +86,7 @@ public final class WorkerManager: ObservableObject {
 
         // Play gentle chime and speak completion summary
         NSSound(named: "Glass")?.play()
-        NativeSpeechFallback.shared.speak(text: "Done! I have completed: \(task.title)")
+        CompanionOrchestrator.shared.speak("Done! I have completed: \(task.title)")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             if AppState.shared.companionState == .happy {

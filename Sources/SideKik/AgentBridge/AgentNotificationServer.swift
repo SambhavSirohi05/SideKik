@@ -91,8 +91,85 @@ public final class AgentNotificationServer: @unchecked Sendable {
             handleReactRequest(bodyData: bodyData, connection: connection)
         } else if method == "POST" && path == "/say" {
             handleSayRequest(bodyData: bodyData, connection: connection)
+        } else if method == "POST" && (path == "/ask" || path == "/interact" || path == "/test") {
+            handleAskRequest(bodyData: bodyData, connection: connection)
+        } else if method == "POST" && path == "/interrupt" {
+            Task { @MainActor in
+                CompanionOrchestrator.shared.interruptSpeech(resumeListening: false)
+                self.sendResponse(status: "200 OK", body: "{\"status\":\"interrupted\"}", connection: connection)
+            }
+        } else if method == "POST" && path == "/tour" {
+            Task { @MainActor in
+                CompanionOrchestrator.shared.startAppTour()
+                self.sendResponse(status: "200 OK", body: "{\"status\":\"tour_started\"}", connection: connection)
+            }
+        } else if method == "POST" && path == "/next_step" {
+            Task { @MainActor in
+                CompanionOrchestrator.shared.nextTourStep()
+                self.sendResponse(status: "200 OK", body: "{\"status\":\"next_step_triggered\"}", connection: connection)
+            }
+        } else if method == "POST" && path == "/prev_step" {
+            Task { @MainActor in
+                CompanionOrchestrator.shared.prevTourStep()
+                self.sendResponse(status: "200 OK", body: "{\"status\":\"prev_step_triggered\"}", connection: connection)
+            }
+        } else if method == "POST" && path == "/toggle_pause" {
+            Task { @MainActor in
+                CompanionOrchestrator.shared.toggleTourPause()
+                self.sendResponse(status: "200 OK", body: "{\"status\":\"pause_toggled\"}", connection: connection)
+            }
+        } else if method == "GET" && path == "/state" {
+            Task { @MainActor in
+                let resJson: [String: Any] = [
+                    "companionState": AppState.shared.companionState.rawValue,
+                    "selectedPetId": AppState.shared.selectedPetId,
+                    "activeAppName": AppState.shared.activeAppName,
+                    "isTourActive": AppState.shared.isTourActive,
+                    "totalTourSteps": AppState.shared.totalTourSteps,
+                    "currentTourStep": AppState.shared.currentTourStep,
+                    "statusMessage": AppState.shared.statusMessage,
+                    "lastAIResponse": AppState.shared.lastAIResponse,
+                    "targetPoint": AppState.shared.targetPoint.map { ["x": $0.x, "y": $0.y] } as Any,
+                    "targetLabel": AppState.shared.targetLabel as Any
+                ]
+                if let outData = try? JSONSerialization.data(withJSONObject: resJson),
+                   let outStr = String(data: outData, encoding: .utf8) {
+                    self.sendResponse(status: "200 OK", body: outStr, connection: connection)
+                } else {
+                    self.sendResponse(status: "200 OK", body: "{}", connection: connection)
+                }
+            }
         } else {
             sendResponse(status: "200 OK", body: "{\"status\":\"SideKik Agent Bridge Active\",\"port\":25425}", connection: connection)
+        }
+    }
+
+    private func handleAskRequest(bodyData: Data, connection: NWConnection) {
+        guard let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any],
+              let question = (json["question"] as? String) ?? (json["prompt"] as? String) else {
+            sendResponse(status: "400 Bad Request", body: "{\"error\":\"Missing question or prompt\"}", connection: connection)
+            return
+        }
+
+        Task { @MainActor in
+            await CompanionOrchestrator.shared.processInteraction(audioData: nil, typedPrompt: question)
+            let resJson: [String: Any] = [
+                "status": "success",
+                "state": AppState.shared.companionState.rawValue,
+                "isTourActive": AppState.shared.isTourActive,
+                "totalTourSteps": AppState.shared.totalTourSteps,
+                "currentTourStep": AppState.shared.currentTourStep,
+                "targetPoint": AppState.shared.targetPoint.map { ["x": $0.x, "y": $0.y] } as Any,
+                "targetLabel": AppState.shared.targetLabel as Any,
+                "lastAIResponse": AppState.shared.lastAIResponse,
+                "statusMessage": AppState.shared.statusMessage
+            ]
+            if let outData = try? JSONSerialization.data(withJSONObject: resJson),
+               let outStr = String(data: outData, encoding: .utf8) {
+                self.sendResponse(status: "200 OK", body: outStr, connection: connection)
+            } else {
+                self.sendResponse(status: "200 OK", body: "{\"status\":\"processed\"}", connection: connection)
+            }
         }
     }
 
@@ -148,13 +225,13 @@ public final class AgentNotificationServer: @unchecked Sendable {
 
         Task { @MainActor in
             AppState.shared.lastAIResponse = text
-            AppState.shared.companionState = .speaking
             if voice {
-                NativeSpeechFallback.shared.speak(text: text) {
-                    Task { @MainActor in
-                        if AppState.shared.companionState == .speaking {
-                            AppState.shared.companionState = .idle
-                        }
+                CompanionOrchestrator.shared.speak(text)
+            } else {
+                AppState.shared.companionState = .speaking
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    if AppState.shared.companionState == .speaking {
+                        AppState.shared.companionState = .idle
                     }
                 }
             }

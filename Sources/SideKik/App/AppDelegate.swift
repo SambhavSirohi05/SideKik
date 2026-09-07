@@ -4,6 +4,8 @@ import AppKit
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
+    public static private(set) var shared: AppDelegate?
+
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var globalHotKeyMonitor: Any?
@@ -11,16 +13,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isHotkeyHeld: Bool = false
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDelegate.shared = self
+
         // Run as menu bar accessory app (no Dock icon)
         NSApp.setActivationPolicy(.accessory)
 
-        // Load saved API keys from Keychain
-        if let geminiKey = KeychainHelper.shared.get(key: "gemini_api_key") {
-            AppState.shared.geminiApiKey = geminiKey
-        }
-        if let sarvamKey = KeychainHelper.shared.get(key: "sarvam_api_key") {
-            AppState.shared.sarvamApiKey = sarvamKey
-        }
+        // Load saved configuration from ~/.config/sidekik/config.json
+        AppState.shared.loadConfig()
 
         // Initialize status item in menu bar
         setupStatusItem()
@@ -37,8 +36,48 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Register push-to-talk hotkey (Control + Option)
         setupPushToTalkHotKey()
 
-        // Check initial system permissions
+        // Check initial system permissions and show onboarding if needed
         PermissionsManager.shared.checkAllPermissions()
+        showOnboardingIfNeeded()
+    }
+
+    private var onboardingWindow: NSWindow?
+
+    public func showOnboardingIfNeeded() {
+        let pm = PermissionsManager.shared
+        if !AppState.shared.hasCompletedOnboarding && (!pm.hasMicrophone || !pm.hasScreenCapture || !pm.hasAccessibility) {
+            showOnboardingWindow()
+        }
+    }
+
+    public func showOnboardingWindow() {
+        if onboardingWindow != nil {
+            onboardingWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 520),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "SideKik Permissions Setup"
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        let hostingView = NSHostingView(rootView: PermissionsOnboardingView { [weak self, weak window] in
+            AppState.shared.hasCompletedOnboarding = true
+            AppState.shared.saveConfig()
+            window?.close()
+            self?.onboardingWindow = nil
+        })
+        window.contentView = hostingView
+        self.onboardingWindow = window
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
@@ -71,11 +110,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func togglePopover() {
         guard let button = statusItem?.button, let popover = self.popover else { return }
 
+        if AppState.shared.companionState == .speaking || AppState.shared.isTourActive {
+            CompanionOrchestrator.shared.interruptSpeech(resumeListening: false)
+        }
+
         if popover.isShown {
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+
+    public func closePopover() {
+        if popover?.isShown == true {
+            popover?.performClose(nil)
         }
     }
 
