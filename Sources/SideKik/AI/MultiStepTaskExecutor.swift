@@ -17,25 +17,41 @@ public final class MultiStepTaskExecutor {
                lower.contains(" and click ") ||
                lower.contains(" and select ") ||
                lower.contains(" and open ") ||
+               lower.contains(" and type ") ||
                lower.contains(" followed by ") ||
-               lower.contains("after that")
+               lower.contains("after that") ||
+               (lower.contains("open ") && lower.contains("type ")) ||
+               (lower.contains("open ") && lower.contains("search ")) ||
+               lower.contains("make the video") ||
+               lower.contains("slow down") ||
+               lower.contains("speed up")
     }
 
-    /// Executes sequential steps, re-observing the screen after each UI transition
+    /// Executes sequential steps, re-observing the screen after each UI transition or executing fast-path from memory
     public func executeSequence(goal: String, activeAppName: String, apiKey: String) async {
+        // 1. Fast-Path Memory Check: If learned workflow exists, execute immediately in <1.2s!
+        if let fastWorkflow = AppMemoryStore.shared.findWorkflow(forPrompt: goal) {
+            print("Found learned workflow in memory for: \(fastWorkflow.intentKey)")
+            let executed = await executeFastWorkflow(fastWorkflow, goal: goal)
+            if executed {
+                return
+            }
+        }
+
         AppState.shared.statusMessage = "Planning task..."
         AppState.shared.companionState = .thinking
         AppState.shared.activeTaskDescription = goal
         AppState.shared.activeTaskProgress = 0.1
 
         var history: [String] = []
+        var recordedSteps: [WorkflowStep] = []
         let maxSteps = 4
 
         for step in 1...maxSteps {
             AppState.shared.activeTaskProgress = Double(step) / Double(maxSteps)
             AppState.shared.statusMessage = "Step \(step): Analyzing screen..."
 
-            // 1. Fresh screen capture to observe current UI state
+            // Fresh screen capture to observe current UI state
             var screenResult: ScreenCaptureResult? = nil
             do {
                 screenResult = try await ScreenCaptureManager.shared.captureActiveDisplay()
@@ -51,6 +67,7 @@ public final class MultiStepTaskExecutor {
             }
 
             let historySummary = history.isEmpty ? "None (initial state)" : history.joined(separator: " -> ")
+            let memorySummary = AppMemoryStore.shared.getLandmarksSummary(app: activeAppName)
 
             let prompt = """
             You are executing an autonomous multi-step GUI task on macOS.
@@ -58,13 +75,17 @@ public final class MultiStepTaskExecutor {
             CURRENT STEP: \(step) of \(maxSteps).
             PREVIOUS ACTIONS EXECUTED: \(historySummary)
 
+            Spatial Memory Context for \(activeAppName):
+            \(memorySummary)
+
             Inspect the current screen image carefully.
             Determine the NEXT PHYSICAL ACTION needed right now to progress toward the user's overall goal.
-            - If the goal has been fully completed (e.g. the final item was already clicked or opened), tag: [DONE:Clear spoken confirmation]
-            - If you need to click an element (e.g. Apple logo, menu item, icon, button, tab): tag: [CLICK:x,y:Label]
+            - If the goal has been fully completed, tag: [DONE:Clear spoken confirmation]
+            - If you need to click an element (menu item, icon, button, tab, clip): tag: [CLICK:x,y:Label]
             - If you need to type text: tag: [TYPE:text]
             - If you need to open an application: tag: [OPEN:AppName]
             - If you need to run a shell command: tag: [RUN:command]
+            - If you need to scroll or scrub a timeline/canvas: tag: [SCROLL:dx,dy:Label]
 
             macOS Menu Guidelines:
             - Apple logo: (x ~ 15, y ~ 12). Clicking it opens the Apple dropdown menu.
@@ -120,7 +141,12 @@ public final class MultiStepTaskExecutor {
                 let clickTarget = CGPoint(x: screenX, y: screenY)
                 ActionController.shared.click(at: clickTarget, targetAppName: nil)
 
-                history.append("Clicked \(response.targetLabel ?? "element") at (\(Int(norm.x)), \(Int(norm.y)))")
+                let label = response.targetLabel ?? "element"
+                history.append("Clicked \(label) at (\(Int(norm.x)), \(Int(norm.y)))")
+                recordedSteps.append(WorkflowStep(actionType: "click", target: label, normX: norm.x, normY: norm.y))
+
+                // Remember landmark for fast recall
+                AppMemoryStore.shared.rememberLandmark(app: activeAppName, key: label, x: norm.x, y: norm.y)
 
                 // Wait for macOS UI transition (menu dropdown, modal opening, window focus)
                 try? await Task.sleep(nanoseconds: 850_000_000)
@@ -132,12 +158,28 @@ public final class MultiStepTaskExecutor {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 ActionController.shared.typeText(txt)
                 history.append("Typed '\(txt)'")
+                recordedSteps.append(WorkflowStep(actionType: "type", target: txt))
                 try? await Task.sleep(nanoseconds: 600_000_000)
             } else if case .openApp(let app) = response.action {
                 CompanionOrchestrator.shared.speak(response.spokenText)
                 _ = ActionController.shared.launchApplication(named: app)
                 history.append("Opened \(app)")
+                recordedSteps.append(WorkflowStep(actionType: "openApp", target: app))
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
+            } else if case .scroll(let dx, let dy, let label) = response.action {
+                AppState.shared.statusMessage = "Scrolling \(label ?? "area")..."
+                CompanionOrchestrator.shared.speak(response.spokenText)
+                let scrollPoint = response.targetPointNormalized.map { norm in
+                    let screenFrame = capture.screenFrame
+                    return CGPoint(
+                        x: screenFrame.origin.x + (norm.x / 1000.0) * screenFrame.width,
+                        y: screenFrame.origin.y + (norm.y / 1000.0) * screenFrame.height
+                    )
+                }
+                ActionController.shared.scroll(deltaX: dx, deltaY: dy, at: scrollPoint)
+                history.append("Scrolled \(label ?? "area") by (dx: \(dx), dy: \(dy))")
+                recordedSteps.append(WorkflowStep(actionType: "scroll", target: label, normX: Double(dx), normY: Double(dy)))
+                try? await Task.sleep(nanoseconds: 700_000_000)
             } else if case .runShell(let cmd) = response.action {
                 CompanionOrchestrator.shared.speak(response.spokenText)
                 _ = await ActionController.shared.executeShellCommand(cmd)
@@ -157,6 +199,11 @@ public final class MultiStepTaskExecutor {
             }
         }
 
+        // Cache the newly discovered workflow into memory for instant repeat runs
+        if !recordedSteps.isEmpty {
+            AppMemoryStore.shared.recordWorkflow(intent: goal, app: activeAppName, steps: recordedSteps)
+        }
+
         // Final completion wrapping
         try? await Task.sleep(nanoseconds: 1_200_000_000)
         AppState.shared.activeTaskDescription = nil
@@ -165,5 +212,81 @@ public final class MultiStepTaskExecutor {
             AppState.shared.companionState = .idle
             AppState.shared.statusMessage = "Ready"
         }
+    }
+
+    /// Fast-path memory execution: executes learned steps directly without calling slow vision API
+    private func executeFastWorkflow(_ workflow: LearnedWorkflow, goal: String) async -> Bool {
+        AppState.shared.statusMessage = "Executing from memory for \(workflow.appName)..."
+        AppState.shared.companionState = .working
+        AppState.shared.activeTaskDescription = goal
+        AppState.shared.activeTaskProgress = 0.2
+
+        var textToType: String? = nil
+        let lowerGoal = goal.lowercased()
+        if let range = lowerGoal.range(of: "type ") {
+            textToType = String(goal[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        for (idx, step) in workflow.steps.enumerated() {
+            AppState.shared.activeTaskProgress = Double(idx + 1) / Double(workflow.steps.count)
+
+            switch step.actionType {
+            case "openApp":
+                let app = step.target ?? workflow.appName
+                _ = ActionController.shared.launchApplication(named: app)
+                try? await Task.sleep(nanoseconds: UInt64((step.delayMs ?? 700) * 1_000_000))
+
+            case "click":
+                let screenFrame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+                let nx = step.normX ?? 500.0
+                let ny = step.normY ?? 500.0
+                let targetX = screenFrame.origin.x + (nx / 1000.0) * screenFrame.width
+                let targetY = screenFrame.origin.y + (ny / 1000.0) * screenFrame.height
+
+                AppState.shared.targetPoint = CGPoint(x: targetX, y: targetY)
+                AppState.shared.targetLabel = step.target ?? "Landmark"
+                AppState.shared.companionState = .pointing
+
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                ActionController.shared.click(at: CGPoint(x: targetX, y: targetY), targetAppName: nil)
+                try? await Task.sleep(nanoseconds: UInt64((step.delayMs ?? 400) * 1_000_000))
+                AppState.shared.targetPoint = nil
+
+            case "type":
+                if let txt = textToType, !txt.isEmpty {
+                    ActionController.shared.typeText(txt)
+                    try? await Task.sleep(nanoseconds: UInt64((step.delayMs ?? 250) * 1_000_000))
+                } else if let fallback = step.target {
+                    ActionController.shared.typeText(fallback)
+                    try? await Task.sleep(nanoseconds: UInt64((step.delayMs ?? 250) * 1_000_000))
+                }
+
+            case "return":
+                ActionController.shared.pressReturn()
+                try? await Task.sleep(nanoseconds: UInt64((step.delayMs ?? 150) * 1_000_000))
+
+            case "scroll":
+                ActionController.shared.scroll(deltaX: Int32(step.normX ?? 0), deltaY: Int32(step.normY ?? -5))
+                try? await Task.sleep(nanoseconds: UInt64((step.delayMs ?? 500) * 1_000_000))
+
+            default:
+                break
+            }
+        }
+
+        AppState.shared.companionState = .happy
+        AppState.shared.statusMessage = "Done! (From Memory)"
+        let confirmation = "Done! Executed \(workflow.appName) workflow from memory."
+        AppState.shared.lastAIResponse = confirmation
+        CompanionOrchestrator.shared.speak(confirmation)
+
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        AppState.shared.activeTaskDescription = nil
+        AppState.shared.activeTaskProgress = nil
+        if AppState.shared.companionState != .speaking {
+            AppState.shared.companionState = .idle
+            AppState.shared.statusMessage = "Ready"
+        }
+        return true
     }
 }

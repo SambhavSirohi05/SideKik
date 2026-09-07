@@ -128,6 +128,16 @@ public final class CompanionOrchestrator: ObservableObject {
 
         let geminiKey = AppState.shared.geminiApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Check if user request matches a learned workflow in memory (Instant <1.2s Fast-Path)
+        if AppMemoryStore.shared.findWorkflow(forPrompt: userQuestion) != nil {
+            await MultiStepTaskExecutor.shared.executeSequence(
+                goal: userQuestion,
+                activeAppName: activeApp,
+                apiKey: geminiKey
+            )
+            return
+        }
+
         // Check if user is asking for an autonomous multi-step GUI sequence (e.g. click Apple logo then click Force Quit)
         if MultiStepTaskExecutor.shared.isMultiStepTask(prompt: userQuestion) {
             guard !geminiKey.isEmpty else {
@@ -209,17 +219,27 @@ public final class CompanionOrchestrator: ObservableObject {
         AppState.shared.lastAIResponse = result.spokenText
 
         // 5. Multi-Step Interactive Guided Tour (Desktop Tutor Mode)
-        if let tour = result.tourSteps, !tour.isEmpty {
+        if let tour = result.tourSteps, tour.count >= 3 {
             Task { @MainActor in
                 await self.executeTour(steps: tour, screenFrame: capture.screenFrame, introText: result.spokenText)
             }
             return
         } else if isTourQuery {
-            // GUARANTEED WALKTHROUGH: If Gemini didn't return steps, synthesize 4 standard zones for activeApp
+            // GUARANTEED WALKTHROUGH: Always ensure a rich 4-5 milestone tour across the entire app interface
+            var combinedSteps = result.tourSteps ?? []
             let fallbackSteps = synthesizeFallbackTour(forApp: activeApp)
-            let intro = result.spokenText.isEmpty ? "Welcome to \(activeApp)! Let me walk you through the key functional areas." : result.spokenText
+            if combinedSteps.isEmpty {
+                combinedSteps = fallbackSteps
+            } else {
+                for fb in fallbackSteps {
+                    if !combinedSteps.contains(where: { $0.label.lowercased() == fb.label.lowercased() }) {
+                        combinedSteps.append(fb)
+                    }
+                }
+            }
+            let intro = result.spokenText.isEmpty ? "Welcome to \(activeApp)! Here is a guided walkthrough of the workspace:" : result.spokenText
             Task { @MainActor in
-                await self.executeTour(steps: fallbackSteps, screenFrame: capture.screenFrame, introText: intro)
+                await self.executeTour(steps: combinedSteps, screenFrame: capture.screenFrame, introText: intro)
             }
             return
         }
@@ -251,6 +271,11 @@ public final class CompanionOrchestrator: ObservableObject {
             targetX: targetCocoaX,
             targetY: targetCocoaY
         )
+
+        // Automatically remember landmark in AppMemoryStore for instant future recall
+        if hasTargetPoint, let label = result.targetLabel, let norm = result.targetPointNormalized {
+            AppMemoryStore.shared.rememberLandmark(app: activeApp, key: label, x: norm.x, y: norm.y)
+        }
 
         // 7. Resolve Actions (Tag-based or User Direct Intent)
         let (resolvedAction, spokenText) = resolveAction(from: result, question: userQuestion)
@@ -300,6 +325,14 @@ public final class CompanionOrchestrator: ObservableObject {
             return
         }
 
+        if case .scroll(let dx, let dy, let label) = resolvedAction {
+            AppState.shared.statusMessage = "Scrolling \(label ?? "area")..."
+            let scrollPoint = hasTargetPoint ? CGPoint(x: targetCocoaX, y: targetCocoaY) : nil
+            ActionController.shared.scroll(deltaX: dx, deltaY: dy, at: scrollPoint)
+            speak(spokenText)
+            return
+        }
+
         // 8. Visual Guidance Pointing (Beacon highlight & cursor flight)
         if hasTargetPoint {
             speak(spokenText) {
@@ -328,6 +361,23 @@ public final class CompanionOrchestrator: ObservableObject {
 
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
+
+        if lower.contains("scroll down") {
+            let speech = result.spokenText.isEmpty ? "Scrolling down." : result.spokenText
+            return (.scroll(0, -8, "down"), speech)
+        } else if lower.contains("scroll up") {
+            let speech = result.spokenText.isEmpty ? "Scrolling up." : result.spokenText
+            return (.scroll(0, 8, "up"), speech)
+        } else if lower.contains("scroll right") || lower.contains("scrub timeline") || lower.contains("scrub forward") {
+            let speech = result.spokenText.isEmpty ? "Scrubbing timeline forward." : result.spokenText
+            return (.scroll(10, 0, "timeline"), speech)
+        } else if lower.contains("scroll left") || lower.contains("scrub backward") {
+            let speech = result.spokenText.isEmpty ? "Scrubbing timeline backward." : result.spokenText
+            return (.scroll(-10, 0, "timeline"), speech)
+        } else if lower == "scroll" || lower.hasPrefix("scroll ") {
+            let speech = result.spokenText.isEmpty ? "Scrolling down." : result.spokenText
+            return (.scroll(0, -8, "screen"), speech)
+        }
 
         if lower.hasPrefix("open ") {
             let appName = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -552,6 +602,63 @@ public final class CompanionOrchestrator: ObservableObject {
     }
 
     private func synthesizeFallbackTour(forApp: String) -> [TourStep] {
+        let lower = forApp.lowercased()
+
+        if lower.contains("vn") || lower.contains("premiere") || lower.contains("final cut") || lower.contains("davinci") || lower.contains("imovie") || lower.contains("video") {
+            return [
+                TourStep(
+                    pointNormalized: CGPoint(x: 500, y: 55),
+                    label: "Toolbar & Export",
+                    narration: "At the top is the main toolbar and the export button where you render your finished project at full resolution."
+                ),
+                TourStep(
+                    pointNormalized: CGPoint(x: 180, y: 250),
+                    label: "Media Library & Assets",
+                    narration: "Here on the left is your media pool where you import footage, audio effects, titles, and stickers."
+                ),
+                TourStep(
+                    pointNormalized: CGPoint(x: 520, y: 360),
+                    label: "Video Preview Monitor",
+                    narration: "In the center is your live playback screen where you review your edits, aspect ratios, and visual effects."
+                ),
+                TourStep(
+                    pointNormalized: CGPoint(x: 500, y: 720),
+                    label: "Multi-Track Timeline",
+                    narration: "Down here is the editing timeline where you can scrub footage horizontally, reorder clips, and synchronize audio."
+                ),
+                TourStep(
+                    pointNormalized: CGPoint(x: 320, y: 840),
+                    label: "Speed & Editing Tools",
+                    narration: "Along the bottom toolbar are your precision editing actions like Split, Speed curves to slow down or speed up clips, and Transitions."
+                )
+            ]
+        }
+
+        if lower.contains("antigravity") || lower.contains("xcode") || lower.contains("code") || lower.contains("cursor") || lower.contains("terminal") {
+            return [
+                TourStep(
+                    pointNormalized: CGPoint(x: 500, y: 50),
+                    label: "Command Palette & Tabs",
+                    narration: "At the top is the header navigation, open file tabs, and the command palette for instant commands."
+                ),
+                TourStep(
+                    pointNormalized: CGPoint(x: 160, y: 350),
+                    label: "Project Explorer & AI Assistant",
+                    narration: "On the left sidebar you can browse your workspace files, git commits, and your AI assistant panel."
+                ),
+                TourStep(
+                    pointNormalized: CGPoint(x: 550, y: 450),
+                    label: "Central Code Editor",
+                    narration: "In the center is your main editor window with syntax highlighting, inline diagnostics, and code definitions."
+                ),
+                TourStep(
+                    pointNormalized: CGPoint(x: 500, y: 850),
+                    label: "Terminal & Diagnostics",
+                    narration: "At the bottom is the integrated terminal, debug console, and build outputs for running your code."
+                )
+            ]
+        }
+
         return [
             TourStep(
                 pointNormalized: CGPoint(x: 500, y: 55),

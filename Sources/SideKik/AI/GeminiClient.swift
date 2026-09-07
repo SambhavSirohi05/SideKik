@@ -55,21 +55,27 @@ public final class GeminiClient: AIClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 25.0
 
+            let memorySummary = AppMemoryStore.shared.getLandmarksSummary(app: activeAppName)
+
             let systemInstruction = """
             You are SideKik, an ambient, intelligent macOS desktop companion living beside the user's cursor.
             Current active application: \(activeAppName).
 
+            Spatial Memory of Known UI Landmarks for \(activeAppName):
+            \(memorySummary)
+            (If the user's inquiry relates to a known landmark above, verify its presence and prioritize those coordinates).
+
             You have the ability to guide the user visually AND perform actions on-screen and off-screen:
             1. If the user asks where something is, asks for guidance, or asks to locate something on screen:
                Locate the exact control or area. Tag it at the end with: [POINT:x,y:Label]
-            2. If the user asks to click, select, or tap an element on screen (e.g., "click save", "click settings", "click it", "open tab"):
+            2. If the user asks to click, select, or tap an element on screen (e.g., "click save", "click settings", "click it", "open tab", "select clip"):
                Tag it at the end with: [CLICK:x,y:Label]
             3. If the user asks to open or launch an application (e.g., "open Safari", "launch Terminal", "open Slack"):
                Tag it at the end with: [OPEN:AppName]
             4. If the user asks to run a terminal/shell command:
                Tag it at the end with: [RUN:command]
-            5. If the user asks to teach them how to use the app, asks for a tour, asks for a walkthrough, or asks to explain the interface (e.g., "teach me how to use this", "walk me through this UI", "show me what things do", "give me a tour", "explain this app"):
-               Identify 4 to 6 distinct, well-separated key functional zones across the application window in a logical walkthrough order (e.g., 1. Top Header/Navigation, 2. Primary Left Sidebar/Explorer, 3. Main Workspace/Editor/Canvas, 4. Right Utility/Inspector/Chat, 5. Bottom Status/Terminal).
+            5. If the user asks to teach them how to use the app, asks for a tour, asks for a walkthrough, or asks to explain the interface (e.g., "teach me how to use this", "walk me through this UI", "show me what things do", "give me a tour", "explain this app", "teach me how to edit in VN"):
+               Identify 4 to 6 distinct, well-separated key functional zones across the application window in a logical walkthrough order (e.g., 1. Top Header/Navigation, 2. Primary Left Sidebar/Explorer/Media Pool, 3. Main Workspace/Editor/Canvas, 4. Timeline/Track/Speed Panel, 5. Bottom Status/Terminal).
                Output each milestone in order using:
                [STEP:x,y:Zone Name:2 spoken sentences explaining this area and what you can do here]
                CRITICAL TOUR RULES:
@@ -78,6 +84,10 @@ public final class GeminiClient: AIClient {
                - You MUST output at least 4 [STEP:...] tags in your response right now. Do not delay or ask questions.
             6. If performing a multi-step task and the goal has been fully completed:
                Tag it at the end with: [DONE:Summary of completed goal]
+            7. If the user asks to scroll a document/page, scrub a video editing timeline, or reveal off-screen items:
+               Tag it at the end with: [SCROLL:dx,dy:Label]
+               - dy: negative to scroll down / reveal below (e.g. -6), positive to scroll up (e.g. +6).
+               - dx: negative to scroll/scrub right along a timeline (e.g. -6), positive to scrub left (e.g. +6).
 
             Coordinate Precision Rules:
             - Coordinates (x, y) are integers from 0 to 1000 representing normalized coordinates (0,0 is top-left, 1000,1000 is bottom-right).
@@ -221,7 +231,22 @@ public final class GeminiClient: AIClient {
             action = .done(summary)
         }
 
-        // 7. Check for Multi-Step Tour [STEP:x,y:Label:Narration] or [STEP 1:x,y:Label:Narration]
+        // 7. Check for [SCROLL:dx,dy:label]
+        let scrollPattern = #"(?i)\[SCROLL:\s*(-?\d+)\s*,\s*(-?\d+)(?:\s*:\s*([^\]]+))?\]"#
+        if let regex = try? NSRegularExpression(pattern: scrollPattern),
+           let match = regex.matches(in: rawText, range: NSRange(location: 0, length: nsString.length)).first {
+            let dxStr = nsString.substring(with: match.range(at: 1))
+            let dyStr = nsString.substring(with: match.range(at: 2))
+            if let dxVal = Int32(dxStr), let dyVal = Int32(dyStr) {
+                var scrollLabel: String? = nil
+                if match.numberOfRanges > 3 && match.range(at: 3).location != NSNotFound {
+                    scrollLabel = nsString.substring(with: match.range(at: 3)).trimmingCharacters(in: .whitespaces)
+                }
+                action = .scroll(dxVal, dyVal, scrollLabel)
+            }
+        }
+
+        // 8. Check for Multi-Step Tour [STEP:x,y:Label:Narration] or [STEP 1:x,y:Label:Narration]
         let stepPattern = #"(?is)\[STEP(?:\s*\d+)?:\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*:\s*([^:\r\n\]]+)\s*:\s*([^\]]+)\]"#
         var tourSteps: [TourStep] = []
         if let regex = try? NSRegularExpression(pattern: stepPattern) {
@@ -242,7 +267,7 @@ public final class GeminiClient: AIClient {
         }
 
         // Clean all brackets tags from spoken text
-        let cleanTagPattern = #"(?is)\[(CLICK|POINT|OPEN|RUN|TYPE|STEP|DONE):[^\]]+\]"#
+        let cleanTagPattern = #"(?is)\[(CLICK|POINT|OPEN|RUN|TYPE|STEP|DONE|SCROLL):[^\]]+\]"#
         var cleanSpoken = rawText
         if let stripRegex = try? NSRegularExpression(pattern: cleanTagPattern) {
             cleanSpoken = stripRegex.stringByReplacingMatches(

@@ -81,6 +81,27 @@ public final class ActionController: Sendable {
         }
     }
 
+    /// Simulates mouse wheel scrolling at an optional screen coordinate (vertical and horizontal timeline scrubbing)
+    public func scroll(deltaX: Int32 = 0, deltaY: Int32 = -5, at point: CGPoint? = nil) {
+        if let target = point {
+            CGWarpMouseCursorPosition(target)
+            usleep(30000)
+        }
+
+        // wheel1: deltaY (positive is up, negative is down)
+        // wheel2: deltaX (positive is left, negative is right)
+        if let scrollEvent = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .line,
+            wheelCount: 2,
+            wheel1: deltaY,
+            wheel2: deltaX,
+            wheel3: 0
+        ) {
+            scrollEvent.post(tap: .cghidEventTap)
+        }
+    }
+
     // MARK: - Off-Screen Tasks Execution
 
     /// Opens or switches to an application by name

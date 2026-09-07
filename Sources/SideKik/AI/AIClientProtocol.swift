@@ -7,6 +7,7 @@ public enum AIActionType: Sendable, Equatable {
     case openApp(String)
     case runShell(String)
     case typeText(String)
+    case scroll(Int32, Int32, String?)
     case done(String)
 }
 
