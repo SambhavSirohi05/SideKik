@@ -118,6 +118,17 @@ public final class AgentNotificationServer: @unchecked Sendable {
                 CompanionOrchestrator.shared.toggleTourPause()
                 self.sendResponse(status: "200 OK", body: "{\"status\":\"pause_toggled\"}", connection: connection)
             }
+        } else if method == "GET" && (path == "/log" || path == "/history") {
+            let entries = InteractionLogger.shared.recentEntries(limit: 20)
+            if let outData = try? JSONEncoder().encode(entries),
+               let outStr = String(data: outData, encoding: .utf8) {
+                self.sendResponse(status: "200 OK", body: outStr, connection: connection)
+            } else {
+                self.sendResponse(status: "200 OK", body: "[]", connection: connection)
+            }
+        } else if method == "GET" && (path == "/log/text" || path == "/logs") {
+            let text = InteractionLogger.shared.formattedLog(limitLines: 150)
+            self.sendResponse(status: "200 OK", body: text, contentType: "text/plain; charset=utf-8", connection: connection)
         } else if method == "GET" && path == "/state" {
             Task { @MainActor in
                 let resJson: [String: Any] = [
@@ -239,10 +250,10 @@ public final class AgentNotificationServer: @unchecked Sendable {
         sendResponse(status: "200 OK", body: "{\"status\":\"speaking\"}", connection: connection)
     }
 
-    private func sendResponse(status: String, body: String, connection: NWConnection) {
+    private func sendResponse(status: String, body: String, contentType: String = "application/json", connection: NWConnection) {
         let response = """
         HTTP/1.1 \(status)\r
-        Content-Type: application/json\r
+        Content-Type: \(contentType)\r
         Content-Length: \(body.utf8.count)\r
         Connection: close\r
         Access-Control-Allow-Origin: *\r

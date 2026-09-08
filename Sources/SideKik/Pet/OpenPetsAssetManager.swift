@@ -80,10 +80,12 @@ public final class OpenPetsAssetManager: @unchecked Sendable {
 
     public func resolvedPetName(forPetId petId: String) -> String {
         switch petId.lowercased() {
-        case "sparky", "fenne-fox", "fenne": return "fenne-fox"
-        case "pixelcat", "yuzu-golden-kitten", "yuzu": return "yuzu-golden-kitten"
-        case "ghosty", "default-pet", "barnaby": return "default-pet"
-        case "robo", "banana-skater", "banana": return "banana-skater"
+        case "azure", "azure-openpets", "sparky", "fenne", "fenne-fox": return "azure"
+        case "patchi", "patchi-openpets", "pixelcat", "yuzu", "yuzu-golden-kitten": return "patchi"
+        case "penguin", "penguin-openpets", "ghosty", "barnaby", "default-pet": return "penguin"
+        case "prickle", "prickle-openpets", "robo", "banana", "banana-skater": return "prickle"
+        case "woolbell", "woolbell-openpets": return "woolbell"
+        case "sporecap", "sporecap-openpets": return "sporecap"
         default: return petId
         }
     }
@@ -176,17 +178,6 @@ public final class OpenPetsAssetManager: @unchecked Sendable {
 
     private func remoteURL(forPetId petId: String) -> URL? {
         let resolved = resolvedPetName(forPetId: petId)
-        switch resolved {
-        case "fenne-fox":
-            return URL(string: "https://openpets.dev/pets/fenne-fox-openpets/spritesheet.webp")
-        case "yuzu-golden-kitten":
-            return URL(string: "https://openpets.dev/pets/yuzu-golden-kitten-openpets/spritesheet.webp")
-        case "default-pet":
-            return URL(string: "https://raw.githubusercontent.com/OpenPetsHQ/openpets/main/apps/desktop/assets/default-pet-spritesheet.webp")
-        case "banana-skater":
-            return URL(string: "https://openpets.dev/pets/banana-skater-openpets/spritesheet.webp")
-        default:
-            return URL(string: "https://openpets.dev/pets/fenne-fox-openpets/spritesheet.webp")
-        }
+        return URL(string: "https://openpets.dev/pets/\(resolved)-openpets/spritesheet.webp")
     }
 }

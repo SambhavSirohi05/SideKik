@@ -54,7 +54,7 @@ public final class AppState: ObservableObject {
     public static let shared = AppState()
 
     // MARK: - Companion & Pet State
-    @Published public var selectedPetId: String = "sparky"
+    @Published public var selectedPetId: String = "azure"
     @Published public var companionState: CompanionState = .idle
     @Published public var statusMessage: String = "Ready"
     @Published public var lastSpokenTranscript: String = ""
@@ -105,7 +105,7 @@ public final class AppState: ObservableObject {
         self.geminiApiKey = config.geminiApiKey
         self.sarvamApiKey = config.sarvamApiKey
         self.selectedVoice = config.selectedVoice
-        self.selectedPetId = config.selectedPetId
+        self.selectedPetId = PetIdentity.find(byId: config.selectedPetId).id
         self.speechPace = config.speechPace
         self.autoClick = config.autoClick
         self.hasCompletedOnboarding = config.hasCompletedOnboarding

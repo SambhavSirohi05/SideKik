@@ -43,8 +43,11 @@ public final class MultiStepTaskExecutor {
         AppState.shared.activeTaskDescription = goal
         AppState.shared.activeTaskProgress = 0.1
 
+        let startTime = Date()
         var history: [String] = []
         var recordedSteps: [WorkflowStep] = []
+        var loggedActions: [LoggedAction] = []
+        var usedLandmarks: [String] = []
         let maxSteps = 4
 
         for step in 1...maxSteps {
@@ -144,6 +147,8 @@ public final class MultiStepTaskExecutor {
                 let label = response.targetLabel ?? "element"
                 history.append("Clicked \(label) at (\(Int(norm.x)), \(Int(norm.y)))")
                 recordedSteps.append(WorkflowStep(actionType: "click", target: label, normX: norm.x, normY: norm.y))
+                loggedActions.append(LoggedAction(type: "click", target: label, x: norm.x, y: norm.y))
+                usedLandmarks.append(label)
 
                 // Remember landmark for fast recall
                 AppMemoryStore.shared.rememberLandmark(app: activeAppName, key: label, x: norm.x, y: norm.y)
@@ -159,12 +164,14 @@ public final class MultiStepTaskExecutor {
                 ActionController.shared.typeText(txt)
                 history.append("Typed '\(txt)'")
                 recordedSteps.append(WorkflowStep(actionType: "type", target: txt))
+                loggedActions.append(LoggedAction(type: "type", details: txt))
                 try? await Task.sleep(nanoseconds: 600_000_000)
             } else if case .openApp(let app) = response.action {
                 CompanionOrchestrator.shared.speak(response.spokenText)
                 _ = ActionController.shared.launchApplication(named: app)
                 history.append("Opened \(app)")
                 recordedSteps.append(WorkflowStep(actionType: "openApp", target: app))
+                loggedActions.append(LoggedAction(type: "openApp", target: app))
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
             } else if case .scroll(let dx, let dy, let label) = response.action {
                 AppState.shared.statusMessage = "Scrolling \(label ?? "area")..."
@@ -179,11 +186,13 @@ public final class MultiStepTaskExecutor {
                 ActionController.shared.scroll(deltaX: dx, deltaY: dy, at: scrollPoint)
                 history.append("Scrolled \(label ?? "area") by (dx: \(dx), dy: \(dy))")
                 recordedSteps.append(WorkflowStep(actionType: "scroll", target: label, normX: Double(dx), normY: Double(dy)))
+                loggedActions.append(LoggedAction(type: "scroll", target: label, details: "dx: \(dx), dy: \(dy)"))
                 try? await Task.sleep(nanoseconds: 700_000_000)
             } else if case .runShell(let cmd) = response.action {
                 CompanionOrchestrator.shared.speak(response.spokenText)
                 _ = await ActionController.shared.executeShellCommand(cmd)
                 history.append("Ran command: \(cmd)")
+                loggedActions.append(LoggedAction(type: "runShell", details: cmd))
                 try? await Task.sleep(nanoseconds: 800_000_000)
             } else {
                 // If no actionable tag, speak the response and end
@@ -203,6 +212,19 @@ public final class MultiStepTaskExecutor {
         if !recordedSteps.isEmpty {
             AppMemoryStore.shared.recordWorkflow(intent: goal, app: activeAppName, steps: recordedSteps)
         }
+
+        let duration = Date().timeIntervalSince(startTime) * 1000.0
+        InteractionLogger.shared.record(InteractionLogEntry(
+            activeAppName: activeAppName,
+            input: goal,
+            mode: "multi_step_agent",
+            output: AppState.shared.lastAIResponse,
+            actions: loggedActions,
+            landmarks: usedLandmarks,
+            durationMs: duration,
+            status: "success",
+            diagnostics: "Executed \(loggedActions.count) actions over multi-step loop."
+        ))
 
         // Final completion wrapping
         try? await Task.sleep(nanoseconds: 1_200_000_000)

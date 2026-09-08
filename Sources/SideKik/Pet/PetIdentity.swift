@@ -31,53 +31,105 @@ public struct PetIdentity: Identifiable, Sendable, Equatable {
         self.accentColorHex = accentColorHex
     }
 
-    public static let sparky = PetIdentity(
-        id: "sparky",
-        name: "Fenne",
-        title: "Cyber Fox",
-        description: "Lively orange fox with oversized ears, curious trot, and warm amber aura.",
-        openPetsId: "fenne-fox",
-        primaryColorHex: "#FF7A00",
-        secondaryColorHex: "#FFA94D",
-        accentColorHex: "#FFF3BF"
+    public static let azure = PetIdentity(
+        id: "azure",
+        name: "Azure",
+        title: "Tiny Blue Dragon",
+        description: "A tiny blue dragon with small wings and a friendly snout.",
+        openPetsId: "azure-openpets",
+        primaryColorHex: "#2563EB",
+        secondaryColorHex: "#60A5FA",
+        accentColorHex: "#DBEAFE"
     )
 
-    public static let pixelCat = PetIdentity(
-        id: "pixelcat",
-        name: "Yuzu",
-        title: "Golden Kitten",
-        description: "Tiny golden tabby kitten with bright round eyes, soft paws, and playful bounce.",
-        openPetsId: "yuzu-golden-kitten",
-        primaryColorHex: "#F59F00",
-        secondaryColorHex: "#FFD43B",
-        accentColorHex: "#FFF9DB"
+    public static let patchi = PetIdentity(
+        id: "patchi",
+        name: "Patchi",
+        title: "Leafy Red Panda",
+        description: "A tiny red panda with leafy head accents and a ringed tail.",
+        openPetsId: "patchi-openpets",
+        primaryColorHex: "#EA580C",
+        secondaryColorHex: "#FB923C",
+        accentColorHex: "#FFEDD5"
     )
 
-    public static let ghosty = PetIdentity(
-        id: "ghosty",
-        name: "Barnaby",
-        title: "OpenPets Bear",
-        description: "The iconic OpenPets companion bear with gentle gestures and friendly guidance.",
-        openPetsId: "default-pet",
-        primaryColorHex: "#4C6EF5",
-        secondaryColorHex: "#748FFC",
-        accentColorHex: "#EDF2FF"
+    public static let prickle = PetIdentity(
+        id: "prickle",
+        name: "Prickle",
+        title: "Potted Cactus",
+        description: "A tiny potted cactus with a pink flower.",
+        openPetsId: "prickle-openpets",
+        primaryColorHex: "#16A34A",
+        secondaryColorHex: "#4ADE80",
+        accentColorHex: "#DCFCE7"
     )
 
-    public static let robo = PetIdentity(
-        id: "robo",
-        name: "Banana",
-        title: "Skater Buddy",
-        description: "Cheerful curved yellow banana on a skateboard wearing a red cap and sneakers.",
-        openPetsId: "banana-skater",
-        primaryColorHex: "#FCC419",
-        secondaryColorHex: "#FFE066",
-        accentColorHex: "#FFF9DB"
+    public static let penguin = PetIdentity(
+        id: "penguin",
+        name: "Penguin",
+        title: "Cozy Penguin",
+        description: "A cozy pixel penguin bundled in a blue scarf.",
+        openPetsId: "penguin-openpets",
+        primaryColorHex: "#0284C7",
+        secondaryColorHex: "#38BDF8",
+        accentColorHex: "#E0F2FE"
     )
 
-    public static let allPets: [PetIdentity] = [.sparky, .pixelCat, .ghosty, .robo]
+    public static let woolbell = PetIdentity(
+        id: "woolbell",
+        name: "Woolbell",
+        title: "Fluffy Ram Lamb",
+        description: "A fluffy ram lamb with curled horns and a small bell collar.",
+        openPetsId: "woolbell-openpets",
+        primaryColorHex: "#F59E0B",
+        secondaryColorHex: "#FCD34D",
+        accentColorHex: "#FEF3C7"
+    )
+
+    public static let sporecap = PetIdentity(
+        id: "sporecap",
+        name: "Sporecap",
+        title: "Cozy Mushroom",
+        description: "A cozy mushroom pet with a red spotted cap and leafy arms.",
+        openPetsId: "sporecap-openpets",
+        primaryColorHex: "#DC2626",
+        secondaryColorHex: "#F87171",
+        accentColorHex: "#FEE2E2"
+    )
+
+    public static let allPets: [PetIdentity] = [
+        .azure,
+        .patchi,
+        .penguin,
+        .prickle,
+        .woolbell,
+        .sporecap
+    ]
 
     public static func find(byId id: String) -> PetIdentity {
-        allPets.first(where: { $0.id == id || $0.openPetsId == id }) ?? .sparky
+        let clean = id.lowercased()
+        if clean == "sparky" || clean == "fenne" { return .azure }
+        if clean == "pixelcat" || clean == "yuzu" { return .patchi }
+        if clean == "ghosty" || clean == "barnaby" { return .penguin }
+        if clean == "robo" || clean == "banana" { return .prickle }
+        return allPets.first(where: { $0.id == clean || $0.openPetsId == clean }) ?? .azure
+    }
+}
+
+extension Color {
+    public init(hex: String) {
+        let cleanHex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: cleanHex).scanHexInt64(&int)
+        let r, g, b: UInt64
+        switch cleanHex.count {
+        case 3:
+            (r, g, b) = ((int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6:
+            (r, g, b) = (int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (r, g, b) = (37, 99, 235)
+        }
+        self.init(.sRGB, red: Double(r)/255, green: Double(g)/255, blue: Double(b)/255, opacity: 1.0)
     }
 }

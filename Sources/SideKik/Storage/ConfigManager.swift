@@ -15,7 +15,7 @@ public struct SideKikConfig: Codable, Sendable {
         geminiApiKey: String = "",
         sarvamApiKey: String = "",
         selectedVoice: String = "shubh",
-        selectedPetId: String = "sparky",
+        selectedPetId: String = "azure",
         speechPace: Double = 1.05,
         autoClick: Bool = false,
         hasCompletedOnboarding: Bool = false
@@ -62,7 +62,7 @@ public final class ConfigManager: @unchecked Sendable {
                 geminiApiKey: "",
                 sarvamApiKey: "",
                 selectedVoice: "shubh",
-                selectedPetId: "sparky",
+                selectedPetId: "azure",
                 speechPace: 1.05,
                 autoClick: false,
                 hasCompletedOnboarding: false

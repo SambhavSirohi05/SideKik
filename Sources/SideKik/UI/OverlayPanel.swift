@@ -20,12 +20,16 @@ public final class OverlayPanel: NSPanel {
         // Make window transparent and completely non-interactive
         self.isOpaque = false
         self.backgroundColor = .clear
-        self.level = .floating
+        // Use overlayWindow level (102) rather than .floating (3) so macOS WindowServer does NOT treat this
+        // as an active window palette, allowing fullscreen apps to cleanly auto-hide their menubar and titlebar.
+        self.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.overlayWindow)))
         self.ignoresMouseEvents = true  // 100% click-through & scroll-through: never blocks user clicks or scrolling!
-        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .fullScreenDisallowsTiling]
         self.isReleasedWhenClosed = false
         self.hasShadow = false
         self.hidesOnDeactivate = false
+        self.animationBehavior = .none
+        self.sharingType = .none
 
         let hostingView = NSHostingView(rootView: CompanionCursorView())
         hostingView.frame = primaryFrame

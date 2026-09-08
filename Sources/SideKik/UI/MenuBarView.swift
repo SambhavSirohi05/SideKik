@@ -51,22 +51,35 @@ public struct MenuBarView: View {
 
             Divider()
 
-            // Pet Selector Bar
-            HStack(spacing: 8) {
-                ForEach(PetIdentity.allPets) { pet in
-                    Button(action: {
-                        state.selectedPetId = pet.id
-                        state.saveConfig()
-                    }) {
-                        Text(pet.name)
-                            .font(.system(size: 10, weight: state.selectedPetId == pet.id ? .bold : .regular))
-                            .foregroundColor(state.selectedPetId == pet.id ? .white : .primary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(state.selectedPetId == pet.id ? Color.accentColor : Color.clear)
-                            .cornerRadius(6)
+            // Pet Selector Bar (6 OpenPets characters)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("CHOOSE COMPANION")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    let currentPet = PetIdentity.find(byId: state.selectedPetId)
+                    Text(currentPet.title)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(Color(hex: currentPet.primaryColorHex))
+                }
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    ForEach(PetIdentity.allPets) { pet in
+                        Button(action: {
+                            state.selectedPetId = pet.id
+                            state.saveConfig()
+                        }) {
+                            Text(pet.name)
+                                .font(.system(size: 10, weight: state.selectedPetId == pet.id ? .bold : .medium))
+                                .foregroundColor(state.selectedPetId == pet.id ? .white : .primary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 5)
+                                .background(state.selectedPetId == pet.id ? Color(hex: pet.primaryColorHex) : Color.primary.opacity(0.06))
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
 

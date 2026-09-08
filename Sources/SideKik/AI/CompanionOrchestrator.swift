@@ -56,6 +56,15 @@ public final class CompanionOrchestrator: ObservableObject {
         AudioManager.shared.stopAudio(notifyCompletion: false)
         cancelTour()
 
+        InteractionLogger.shared.record(InteractionLogEntry(
+            activeAppName: AppState.shared.activeAppName,
+            input: "[USER_INTERRUPT]",
+            mode: "interrupt",
+            output: "Cut speech mid-sentence",
+            actions: [LoggedAction(type: "interruptSpeech", details: "resumeListening: \(resumeListening)")],
+            status: "interrupted"
+        ))
+
         if resumeListening {
             do {
                 try AudioManager.shared.startRecording()
@@ -78,6 +87,7 @@ public final class CompanionOrchestrator: ObservableObject {
 
     /// Executes end-to-end multi-modal flow
     public func processInteraction(audioData: Data?, typedPrompt: String? = nil) async {
+        let interactionStartTime = Date()
         guard !isProcessing else { return }
         isProcessing = true
         defer { isProcessing = false }
@@ -123,6 +133,16 @@ public final class CompanionOrchestrator: ObservableObject {
         // Check if user is asking for a background task
         if isBackgroundTaskRequest(userQuestion) {
             WorkerManager.shared.spawnTask(title: "Autonomous Agent Task", brief: userQuestion)
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "background_task",
+                output: "Spawned background agent task",
+                actions: [LoggedAction(type: "spawnTask", target: "Autonomous Agent Task", details: userQuestion)],
+                durationMs: duration,
+                status: "success"
+            ))
             return
         }
 
@@ -182,6 +202,16 @@ public final class CompanionOrchestrator: ObservableObject {
         guard let capture = screenResult else {
             AppState.shared.companionState = .error
             AppState.shared.statusMessage = "Screen capture failed"
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "screen_capture",
+                output: "Screen capture failed",
+                durationMs: duration,
+                status: "error",
+                diagnostics: "Screen capture failed. Check Screen Recording permissions in System Settings."
+            ))
             speak("I couldn't capture the screen. Please verify Screen Recording permissions in System Settings.")
             return
         }
@@ -213,6 +243,16 @@ public final class CompanionOrchestrator: ObservableObject {
 
         guard let result = aiResponse else {
             AppState.shared.companionState = .error
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "gemini_vision",
+                output: "No AI response returned",
+                durationMs: duration,
+                status: "error",
+                diagnostics: "Gemini client returned nil response"
+            ))
             return
         }
 
@@ -220,6 +260,24 @@ public final class CompanionOrchestrator: ObservableObject {
 
         // 5. Multi-Step Interactive Guided Tour (Desktop Tutor Mode)
         if let tour = result.tourSteps, tour.count >= 3 {
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            let actions = tour.map { step in
+                let norm = step.pointNormalized
+                let screenX = capture.screenFrame.origin.x + (norm.x / 1000.0) * capture.screenFrame.width
+                let screenY = capture.screenFrame.origin.y + (norm.y / 1000.0) * capture.screenFrame.height
+                return LoggedAction(type: "tourStep", target: step.label, x: screenX, y: screenY, details: step.narration)
+            }
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "tour",
+                output: result.spokenText,
+                rawOutput: result.rawText,
+                actions: actions,
+                landmarks: tour.map { $0.label },
+                durationMs: duration,
+                status: "success"
+            ))
             Task { @MainActor in
                 await self.executeTour(steps: tour, screenFrame: capture.screenFrame, introText: result.spokenText)
             }
@@ -238,6 +296,24 @@ public final class CompanionOrchestrator: ObservableObject {
                 }
             }
             let intro = result.spokenText.isEmpty ? "Welcome to \(activeApp)! Here is a guided walkthrough of the workspace:" : result.spokenText
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            let actions = combinedSteps.map { step in
+                let norm = step.pointNormalized
+                let screenX = capture.screenFrame.origin.x + (norm.x / 1000.0) * capture.screenFrame.width
+                let screenY = capture.screenFrame.origin.y + (norm.y / 1000.0) * capture.screenFrame.height
+                return LoggedAction(type: "tourStep", target: step.label, x: screenX, y: screenY, details: step.narration)
+            }
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "tour_fallback",
+                output: intro,
+                rawOutput: result.rawText,
+                actions: actions,
+                landmarks: combinedSteps.map { $0.label },
+                durationMs: duration,
+                status: "success"
+            ))
             Task { @MainActor in
                 await self.executeTour(steps: combinedSteps, screenFrame: capture.screenFrame, introText: intro)
             }
@@ -285,6 +361,20 @@ public final class CompanionOrchestrator: ObservableObject {
 
         if shouldAutoClick && hasTargetPoint {
             let clickTarget = CGPoint(x: targetCocoaX, y: targetCocoaY)
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "click",
+                output: spokenText,
+                rawOutput: result.rawText,
+                actions: [
+                    LoggedAction(type: "click", target: result.targetLabel ?? "target", x: targetCocoaX, y: targetCocoaY, details: "autoClick: \(shouldAutoClick)")
+                ],
+                landmarks: result.targetLabel != nil ? [result.targetLabel!] : [],
+                durationMs: duration,
+                status: "success"
+            ))
             speak(spokenText)
             Task {
                 try? await Task.sleep(nanoseconds: 600_000_000)
@@ -305,6 +395,18 @@ public final class CompanionOrchestrator: ObservableObject {
         if case .openApp(let appToOpen) = resolvedAction {
             let success = ActionController.shared.launchApplication(named: appToOpen)
             AppState.shared.statusMessage = success ? "Opened \(appToOpen)" : "Could not open \(appToOpen)"
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "openApp",
+                output: spokenText,
+                rawOutput: result.rawText,
+                actions: [LoggedAction(type: "openApp", target: appToOpen, details: "success: \(success)")],
+                durationMs: duration,
+                status: success ? "success" : "error",
+                diagnostics: success ? nil : "Failed to launch application \(appToOpen)"
+            ))
             speak(spokenText)
             return
         }
@@ -315,12 +417,34 @@ public final class CompanionOrchestrator: ObservableObject {
             let speech = spokenText.isEmpty ? "Command executed." : spokenText
             AppState.shared.lastAIResponse = "\(speech)\n\n$ \(cmd)\n\(output)"
             AppState.shared.statusMessage = "Completed"
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "runShell",
+                output: speech,
+                rawOutput: output,
+                actions: [LoggedAction(type: "runShell", details: cmd)],
+                durationMs: duration,
+                status: "success"
+            ))
             speak(speech)
             return
         }
 
         if case .typeText(let txt) = resolvedAction {
             ActionController.shared.typeText(txt)
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "typeText",
+                output: spokenText,
+                rawOutput: result.rawText,
+                actions: [LoggedAction(type: "typeText", details: txt)],
+                durationMs: duration,
+                status: "success"
+            ))
             speak(spokenText)
             return
         }
@@ -329,12 +453,35 @@ public final class CompanionOrchestrator: ObservableObject {
             AppState.shared.statusMessage = "Scrolling \(label ?? "area")..."
             let scrollPoint = hasTargetPoint ? CGPoint(x: targetCocoaX, y: targetCocoaY) : nil
             ActionController.shared.scroll(deltaX: dx, deltaY: dy, at: scrollPoint)
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "scroll",
+                output: spokenText,
+                rawOutput: result.rawText,
+                actions: [LoggedAction(type: "scroll", target: label, x: scrollPoint.map { Double($0.x) }, y: scrollPoint.map { Double($0.y) }, details: "dx: \(dx), dy: \(dy)")],
+                durationMs: duration,
+                status: "success"
+            ))
             speak(spokenText)
             return
         }
 
         // 8. Visual Guidance Pointing (Beacon highlight & cursor flight)
         if hasTargetPoint {
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "point",
+                output: spokenText,
+                rawOutput: result.rawText,
+                actions: [LoggedAction(type: "point", target: result.targetLabel ?? "target", x: targetCocoaX, y: targetCocoaY)],
+                landmarks: result.targetLabel != nil ? [result.targetLabel!] : [],
+                durationMs: duration,
+                status: "success"
+            ))
             speak(spokenText) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
                     if AppState.shared.companionState == .pointing {
@@ -350,6 +497,16 @@ public final class CompanionOrchestrator: ObservableObject {
         }
 
         // 9. General Spoken Response via Sarvam AI
+        let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+        InteractionLogger.shared.record(InteractionLogEntry(
+            activeAppName: activeApp,
+            input: userQuestion,
+            mode: "conversation",
+            output: spokenText,
+            rawOutput: result.rawText,
+            durationMs: duration,
+            status: "success"
+        ))
         speak(spokenText)
     }
 

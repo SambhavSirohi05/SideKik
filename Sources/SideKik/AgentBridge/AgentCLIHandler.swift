@@ -54,11 +54,30 @@ public final class AgentCLIHandler: Sendable {
               -H "Content-Type: application/json" \\
               -d "{\\"text\\": \\"$TEXT\\", \\"voice\\": true}"
             ;;
+          ask)
+            PROMPT="$2"
+            curl -s -X POST "$SERVER_URL/ask" \\
+              -H "Content-Type: application/json" \\
+              -d "{\\"prompt\\": \\"$PROMPT\\"}"
+            ;;
+          log)
+            curl -s "$SERVER_URL/log/text"
+            ;;
+          history|jsonlog)
+            curl -s "$SERVER_URL/log"
+            ;;
+          state)
+            curl -s "$SERVER_URL/state"
+            ;;
           *)
-            echo "Usage: sidekik [notify|react|say] [options]"
+            echo "Usage: sidekik [notify|react|say|ask|log|history|state] [options]"
+            echo "  sidekik log                               View recent interaction & action execution logs"
+            echo "  sidekik history                           View JSON formatted interaction logs"
+            echo "  sidekik state                             Check companion live state & selected pet"
             echo "  sidekik notify --app 'Cursor' --message 'Waiting for input'"
             echo "  sidekik react [happy|thinking|alert|idle]"
             echo "  sidekik say 'Task completed!'"
+            echo "  sidekik ask 'Teach me how to edit video in VN'"
             ;;
         esac
         """
