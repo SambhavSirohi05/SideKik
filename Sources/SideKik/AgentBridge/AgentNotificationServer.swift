@@ -118,6 +118,12 @@ public final class AgentNotificationServer: @unchecked Sendable {
                 CompanionOrchestrator.shared.toggleTourPause()
                 self.sendResponse(status: "200 OK", body: "{\"status\":\"pause_toggled\"}", connection: connection)
             }
+        } else if method == "POST" && path == "/toggle_pet" {
+            Task { @MainActor in
+                AppState.shared.isPetEnabled.toggle()
+                AppState.shared.saveConfig()
+                self.sendResponse(status: "200 OK", body: "{\"isPetEnabled\":\(AppState.shared.isPetEnabled)}", connection: connection)
+            }
         } else if method == "GET" && (path == "/log" || path == "/history") {
             let entries = InteractionLogger.shared.recentEntries(limit: 20)
             if let outData = try? JSONEncoder().encode(entries),
@@ -134,6 +140,7 @@ public final class AgentNotificationServer: @unchecked Sendable {
                 let resJson: [String: Any] = [
                     "companionState": AppState.shared.companionState.rawValue,
                     "selectedPetId": AppState.shared.selectedPetId,
+                    "isPetEnabled": AppState.shared.isPetEnabled,
                     "activeAppName": AppState.shared.activeAppName,
                     "isTourActive": AppState.shared.isTourActive,
                     "totalTourSteps": AppState.shared.totalTourSteps,

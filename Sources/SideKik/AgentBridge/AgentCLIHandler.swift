@@ -69,11 +69,15 @@ public final class AgentCLIHandler: Sendable {
           state)
             curl -s "$SERVER_URL/state"
             ;;
+          toggle-pet|pet)
+            curl -s -X POST "$SERVER_URL/toggle_pet"
+            ;;
           *)
-            echo "Usage: sidekik [notify|react|say|ask|log|history|state] [options]"
+            echo "Usage: sidekik [notify|react|say|ask|log|history|state|toggle-pet] [options]"
             echo "  sidekik log                               View recent interaction & action execution logs"
             echo "  sidekik history                           View JSON formatted interaction logs"
             echo "  sidekik state                             Check companion live state & selected pet"
+            echo "  sidekik toggle-pet                        Toggle on-screen pet avatar visibility"
             echo "  sidekik notify --app 'Cursor' --message 'Waiting for input'"
             echo "  sidekik react [happy|thinking|alert|idle]"
             echo "  sidekik say 'Task completed!'"

@@ -42,7 +42,7 @@ public final class GeminiClient: AIClient {
             throw GeminiError.missingApiKey
         }
 
-        let modelCandidates = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+        let modelCandidates = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]
         var lastError: Error = GeminiError.apiError(404, "No model available")
 
         for model in modelCandidates {
@@ -140,6 +140,92 @@ public final class GeminiClient: AIClient {
                 }
 
                 // Parse candidates
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let candidates = json["candidates"] as? [[String: Any]],
+                      let firstCandidate = candidates.first,
+                      let content = firstCandidate["content"] as? [String: Any],
+                      let parts = content["parts"] as? [[String: Any]],
+                      let firstPart = parts.first,
+                      let rawText = firstPart["text"] as? String else {
+                    lastError = GeminiError.decodingError("Empty response from Gemini")
+                    continue
+                }
+
+                return parseResponseText(rawText)
+            } catch {
+                lastError = error
+                continue
+            }
+        }
+
+        throw lastError
+    }
+
+    /// Fast text-only reasoning without screen capture or image encoding (sub-second latency)
+    public func askText(
+        question: String,
+        activeAppName: String,
+        apiKey: String
+    ) async throws -> AIResponse {
+        let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKey.isEmpty else {
+            throw GeminiError.missingApiKey
+        }
+
+        let modelCandidates = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]
+        var lastError: Error = GeminiError.apiError(404, "No model available")
+
+        for model in modelCandidates {
+            guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(cleanKey)") else {
+                continue
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 10.0
+
+            let systemInstruction = """
+            You are SideKik, an ambient, intelligent macOS desktop companion living beside the user's cursor.
+            Current active application: \(activeAppName).
+
+            The user is asking a conversational, knowledge, reasoning, or command question. No screen capture is needed.
+            If the user asks to open or launch an application: tag it at the end with: [OPEN:AppName]
+            If the user asks to run a shell command: tag it at the end with: [RUN:command]
+            Respond concisely in 1 to 2 natural spoken sentences (under 35 words).
+            Do NOT use markdown (no asterisks, bolding, bullet lists, or backticks) as your response will be read aloud by text-to-speech.
+            """
+
+            let payload: [String: Any] = [
+                "contents": [
+                    [
+                        "role": "user",
+                        "parts": [
+                            ["text": "\(systemInstruction)\n\nUser Question: \(question)"]
+                        ]
+                    ]
+                ],
+                "generationConfig": [
+                    "temperature": 0.4,
+                    "maxOutputTokens": 256
+                ]
+            ]
+
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+                let (data, response) = try await session.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    lastError = GeminiError.networkError("Invalid HTTP response")
+                    continue
+                }
+
+                if httpResponse.statusCode != 200 {
+                    let errorText = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    lastError = GeminiError.apiError(httpResponse.statusCode, errorText)
+                    continue
+                }
+
                 guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let candidates = json["candidates"] as? [[String: Any]],
                       let firstCandidate = candidates.first,

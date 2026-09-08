@@ -39,8 +39,11 @@ public struct CompanionCursorView: View {
                 }
 
                 // 3. Animated Companion Pet Avatar (OpenPets authentic sprite engine)
-                companionAvatarView
-                    .position(petPosition)
+                if state.isPetEnabled {
+                    companionAvatarView
+                        .position(petPosition)
+                        .transition(.scale.combined(with: .opacity))
+                }
 
                 // 4. Ambient Speech & Tour Control Callout
                 if shouldShowBubble {

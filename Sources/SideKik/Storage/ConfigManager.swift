@@ -10,6 +10,7 @@ public struct SideKikConfig: Codable, Sendable {
     public var speechPace: Double
     public var autoClick: Bool
     public var hasCompletedOnboarding: Bool
+    public var isPetEnabled: Bool
 
     public init(
         geminiApiKey: String = "",
@@ -18,7 +19,8 @@ public struct SideKikConfig: Codable, Sendable {
         selectedPetId: String = "azure",
         speechPace: Double = 1.05,
         autoClick: Bool = false,
-        hasCompletedOnboarding: Bool = false
+        hasCompletedOnboarding: Bool = false,
+        isPetEnabled: Bool = true
     ) {
         self.geminiApiKey = geminiApiKey
         self.sarvamApiKey = sarvamApiKey
@@ -27,6 +29,19 @@ public struct SideKikConfig: Codable, Sendable {
         self.speechPace = speechPace
         self.autoClick = autoClick
         self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.isPetEnabled = isPetEnabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        geminiApiKey = try container.decodeIfPresent(String.self, forKey: .geminiApiKey) ?? ""
+        sarvamApiKey = try container.decodeIfPresent(String.self, forKey: .sarvamApiKey) ?? ""
+        selectedVoice = try container.decodeIfPresent(String.self, forKey: .selectedVoice) ?? "shubh"
+        selectedPetId = try container.decodeIfPresent(String.self, forKey: .selectedPetId) ?? "azure"
+        speechPace = try container.decodeIfPresent(Double.self, forKey: .speechPace) ?? 1.05
+        autoClick = try container.decodeIfPresent(Bool.self, forKey: .autoClick) ?? false
+        hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        isPetEnabled = try container.decodeIfPresent(Bool.self, forKey: .isPetEnabled) ?? true
     }
 }
 
@@ -65,7 +80,8 @@ public final class ConfigManager: @unchecked Sendable {
                 selectedPetId: "azure",
                 speechPace: 1.05,
                 autoClick: false,
-                hasCompletedOnboarding: false
+                hasCompletedOnboarding: false,
+                isPetEnabled: true
             )
         }
         return config

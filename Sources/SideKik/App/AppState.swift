@@ -55,6 +55,7 @@ public final class AppState: ObservableObject {
 
     // MARK: - Companion & Pet State
     @Published public var selectedPetId: String = "azure"
+    @Published public var isPetEnabled: Bool = true
     @Published public var companionState: CompanionState = .idle
     @Published public var statusMessage: String = "Ready"
     @Published public var lastSpokenTranscript: String = ""
@@ -109,6 +110,7 @@ public final class AppState: ObservableObject {
         self.speechPace = config.speechPace
         self.autoClick = config.autoClick
         self.hasCompletedOnboarding = config.hasCompletedOnboarding
+        self.isPetEnabled = config.isPetEnabled
     }
 
     public func saveConfig() {
@@ -119,7 +121,8 @@ public final class AppState: ObservableObject {
             selectedPetId: self.selectedPetId,
             speechPace: self.speechPace,
             autoClick: self.autoClick,
-            hasCompletedOnboarding: self.hasCompletedOnboarding
+            hasCompletedOnboarding: self.hasCompletedOnboarding,
+            isPetEnabled: self.isPetEnabled
         )
         ConfigManager.shared.save(config)
     }

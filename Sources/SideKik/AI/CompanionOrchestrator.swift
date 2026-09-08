@@ -172,8 +172,120 @@ public final class CompanionOrchestrator: ObservableObject {
             return
         }
 
-        // Detect if user query is asking for a tutorial / tour (robust to spacing/typos like "walkmethrough")
         let lowerQ = userQuestion.lowercased()
+        let trimmedQ = userQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Instant App Launch (Zero LLM Latency <20ms)
+        if lowerQ.hasPrefix("open ") || lowerQ.hasPrefix("launch ") {
+            let prefixLen = lowerQ.hasPrefix("open ") ? 5 : 7
+            let appToOpen = String(trimmedQ.dropFirst(prefixLen)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !appToOpen.isEmpty && !appToOpen.contains("http") && !appToOpen.contains(".com") {
+                let success = ActionController.shared.launchApplication(named: appToOpen)
+                let spoken = success ? "Opening \(appToOpen) for you." : "I couldn't find \(appToOpen) on your Mac."
+                AppState.shared.statusMessage = success ? "Opened \(appToOpen)" : "Could not open \(appToOpen)"
+                let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+                InteractionLogger.shared.record(InteractionLogEntry(
+                    activeAppName: activeApp,
+                    input: userQuestion,
+                    mode: "instant_open",
+                    output: spoken,
+                    actions: [LoggedAction(type: "openApp", target: appToOpen, details: "success: \(success)")],
+                    durationMs: duration,
+                    status: success ? "success" : "error"
+                ))
+                speak(spoken)
+                return
+            }
+        }
+
+        // Fast Pure-Text LLM Routing (Bypass Screen Capture for Conversational / Knowledge Queries)
+        if !queryRequiresVision(userQuestion) {
+            AppState.shared.statusMessage = "Thinking..."
+            AppState.shared.companionState = .thinking
+
+            var textResponse: AIResponse? = nil
+            if !geminiKey.isEmpty {
+                do {
+                    textResponse = try await GeminiClient.shared.askText(
+                        question: userQuestion,
+                        activeAppName: activeApp,
+                        apiKey: geminiKey
+                    )
+                } catch {
+                    print("Gemini fast-text inference error: \(error)")
+                    textResponse = AIResponse(
+                        spokenText: "I encountered an error connecting to Gemini. \(error.localizedDescription)",
+                        rawText: error.localizedDescription
+                    )
+                }
+            } else {
+                textResponse = AIResponse(
+                    spokenText: "I can answer your questions directly! Please add your free Google AI Studio API key in the menu bar to activate full intelligence.",
+                    rawText: "Please add your API key in Settings."
+                )
+            }
+
+            guard let result = textResponse else {
+                AppState.shared.companionState = .error
+                return
+            }
+
+            AppState.shared.lastAIResponse = result.spokenText
+
+            let (resolvedAction, spokenText) = resolveAction(from: result, question: userQuestion)
+            let duration = Date().timeIntervalSince(interactionStartTime) * 1000.0
+
+            if case .openApp(let appToOpen) = resolvedAction {
+                let success = ActionController.shared.launchApplication(named: appToOpen)
+                AppState.shared.statusMessage = success ? "Opened \(appToOpen)" : "Could not open \(appToOpen)"
+                InteractionLogger.shared.record(InteractionLogEntry(
+                    activeAppName: activeApp,
+                    input: userQuestion,
+                    mode: "openApp",
+                    output: spokenText,
+                    rawOutput: result.rawText,
+                    actions: [LoggedAction(type: "openApp", target: appToOpen, details: "success: \(success)")],
+                    durationMs: duration,
+                    status: success ? "success" : "error"
+                ))
+                speak(spokenText)
+                return
+            }
+
+            if case .runShell(let cmd) = resolvedAction {
+                AppState.shared.statusMessage = "Running command..."
+                let output = await ActionController.shared.executeShellCommand(cmd)
+                let speech = spokenText.isEmpty ? "Command executed." : spokenText
+                AppState.shared.lastAIResponse = "\(speech)\n\n$ \(cmd)\n\(output)"
+                AppState.shared.statusMessage = "Completed"
+                InteractionLogger.shared.record(InteractionLogEntry(
+                    activeAppName: activeApp,
+                    input: userQuestion,
+                    mode: "runShell",
+                    output: speech,
+                    rawOutput: output,
+                    actions: [LoggedAction(type: "runShell", details: cmd)],
+                    durationMs: duration,
+                    status: "success"
+                ))
+                speak(speech)
+                return
+            }
+
+            InteractionLogger.shared.record(InteractionLogEntry(
+                activeAppName: activeApp,
+                input: userQuestion,
+                mode: "fast_text_reasoning",
+                output: spokenText,
+                rawOutput: result.rawText,
+                durationMs: duration,
+                status: "success"
+            ))
+            speak(spokenText)
+            return
+        }
+
+        // Detect if user query is asking for a tutorial / tour (robust to spacing/typos like "walkmethrough")
         let cleanNoSpaces = lowerQ.replacingOccurrences(of: " ", with: "")
         let isTourQuery = lowerQ.contains("tour") ||
                           lowerQ.contains("teach") ||
@@ -572,6 +684,32 @@ public final class CompanionOrchestrator: ObservableObject {
         }
 
         return (nil, result.spokenText)
+    }
+
+    /// Determines whether the user prompt requires visual screen capture or can be answered via fast-text LLM
+    private func queryRequiresVision(_ query: String) -> Bool {
+        let lower = query.lowercased()
+        let cleanNoSpaces = lower.replacingOccurrences(of: " ", with: "")
+
+        let visualKeywords = [
+            "screen", "look at", "what do you see", "what is on", "what's on",
+            "read this", "read what", "inspect", "summarize this page",
+            "what does it say", "what does this say", "can you see",
+            "click", "tap", "press", "select", "where is", "where's", "find the",
+            "point to", "point at", "highlight", "show me where", "locate",
+            "tour", "walkthrough", "walk me", "teach me", "guide me",
+            "how do i use", "show me around", "explain this app", "explain the interface",
+            "scroll", "scrub", "zoom", "button", "tab", "window", "dialog", "icon", "cursor",
+            "sidebar", "timeline", "speed tool"
+        ]
+
+        for keyword in visualKeywords {
+            if lower.contains(keyword) || cleanNoSpaces.contains(keyword.replacingOccurrences(of: " ", with: "")) {
+                return true
+            }
+        }
+
+        return false
     }
 
     /// Speaks text using Sarvam AI Bulbul v3 with zero robotic native voice
